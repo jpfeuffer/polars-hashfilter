@@ -38,7 +38,7 @@ impl StringHashSet {
     /// Create a StringHashSet from an iterable of strings.
     /// This is the only place where we copy data from Python to Rust.
     #[staticmethod]
-    pub fn from_iter(values: Vec<String>) -> Self {
+    pub fn from_values(values: Vec<String>) -> Self {
         let set: PlHashSet<String> = values.into_iter().collect();
         Self {
             inner: Arc::new(RwLock::new(set)),
