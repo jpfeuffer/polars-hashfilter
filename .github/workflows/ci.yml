@@ -7,14 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Build Rust on ${{ matrix.os }}
+  test:
+    name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,44 +23,6 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Build Rust library
-        run: cargo build --release
-
-      - name: Upload Rust artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-${{ matrix.os }}
-          path: target/release/
-
-  test:
-    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Download Rust artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-${{ matrix.os }}
-          path: target/release/
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -68,11 +30,15 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/pyproject.toml"
 
-      - name: Install project and test dependencies
-        run: uv sync
-
-      - name: Run tests
-        run: uv run pytest tests/ -v
+      - name: Test all Python versions
+        run: |
+          for version in 3.10 3.11 3.12 3.13 3.14; do
+            echo "::group::Testing Python $version"
+            uv python install $version
+            uv sync --python $version
+            uv run --python $version pytest tests/ -v
+            echo "::endgroup::"
+          done
 
   lint:
     name: Lint
