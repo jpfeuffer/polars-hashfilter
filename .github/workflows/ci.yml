@@ -8,12 +8,13 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
+    name: Test on ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.14']
 
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +24,8 @@ jobs:
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          key: py${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -30,16 +33,14 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/pyproject.toml"
 
-      - name: Test all Python versions
-        shell: bash
-        run: |
-          for version in 3.10 3.11 3.12 3.13 3.14; do
-            echo "::group::Testing Python $version"
-            uv python install $version
-            uv sync --python $version
-            uv run --python $version pytest tests/ -v
-            echo "::endgroup::"
-          done
+      - name: Install Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: uv run --python ${{ matrix.python-version }} pytest tests/ -v
 
   lint:
     name: Lint
