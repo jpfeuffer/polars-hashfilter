@@ -21,9 +21,9 @@ class TestStringHashSet:
         assert len(s) == 0
         assert s.is_empty()
 
-    def test_from_iter(self):
+    def test_from_values(self):
         """Test creating a set from an iterable."""
-        s = StringHashSet.from_iter(["a", "b", "c"])
+        s = StringHashSet.from_values(["a", "b", "c"])
         assert len(s) == 3
         assert s.contains("a")
         assert s.contains("b")
@@ -39,33 +39,33 @@ class TestStringHashSet:
 
     def test_remove(self):
         """Test removing values."""
-        s = StringHashSet.from_iter(["a", "b"])
+        s = StringHashSet.from_values(["a", "b"])
         assert s.remove("a") is True
         assert s.remove("a") is False  # Already removed
         assert len(s) == 1
 
     def test_clear(self):
         """Test clearing the set."""
-        s = StringHashSet.from_iter(["a", "b", "c"])
+        s = StringHashSet.from_values(["a", "b", "c"])
         s.clear()
         assert len(s) == 0
         assert s.is_empty()
 
     def test_to_list(self):
         """Test converting to list."""
-        s = StringHashSet.from_iter(["a", "b", "c"])
+        s = StringHashSet.from_values(["a", "b", "c"])
         lst = s.to_list()
         assert set(lst) == {"a", "b", "c"}
 
     def test_extend(self):
         """Test extending the set."""
-        s = StringHashSet.from_iter(["a"])
+        s = StringHashSet.from_values(["a"])
         s.extend(["b", "c"])
         assert len(s) == 3
 
     def test_repr(self):
         """Test string representation."""
-        s = StringHashSet.from_iter(["a", "b"])
+        s = StringHashSet.from_values(["a", "b"])
         assert repr(s) == "StringHashSet(len=2)"
 
     def test_ptr_is_stable(self):
@@ -83,7 +83,7 @@ class TestIsInHashSet:
 
     def test_basic_filter(self):
         """Test basic is_in filtering."""
-        seen = StringHashSet.from_iter(["a", "c"])
+        seen = StringHashSet.from_values(["a", "c"])
         df = pl.DataFrame({"id": ["a", "b", "c", "d"]})
 
         result = df.select(is_in_hashset(pl.col("id"), seen).alias("in_set"))
@@ -91,7 +91,7 @@ class TestIsInHashSet:
 
     def test_filter_with_namespace(self):
         """Test is_in using the expression namespace."""
-        seen = StringHashSet.from_iter(["a", "c"])
+        seen = StringHashSet.from_values(["a", "c"])
         df = pl.DataFrame({"id": ["a", "b", "c", "d"]})
 
         result = df.filter(pl.col("id").hashfilter.is_in(seen))
@@ -99,7 +99,7 @@ class TestIsInHashSet:
 
     def test_with_nulls(self):
         """Test is_in with null values."""
-        seen = StringHashSet.from_iter(["a", "b"])
+        seen = StringHashSet.from_values(["a", "b"])
         df = pl.DataFrame({"id": ["a", None, "b", "c"]})
 
         result = df.select(is_in_hashset(pl.col("id"), seen).alias("in_set"))
@@ -111,7 +111,7 @@ class TestNotInHashSet:
 
     def test_basic_filter(self):
         """Test basic not_in filtering."""
-        seen = StringHashSet.from_iter(["a", "c"])
+        seen = StringHashSet.from_values(["a", "c"])
         df = pl.DataFrame({"id": ["a", "b", "c", "d"]})
 
         result = df.select(not_in_hashset(pl.col("id"), seen).alias("not_in_set"))
@@ -119,7 +119,7 @@ class TestNotInHashSet:
 
     def test_filter_with_namespace(self):
         """Test not_in using the expression namespace."""
-        seen = StringHashSet.from_iter(["a", "c"])
+        seen = StringHashSet.from_values(["a", "c"])
         df = pl.DataFrame({"id": ["a", "b", "c", "d"]})
 
         result = df.filter(pl.col("id").hashfilter.not_in(seen))
@@ -202,7 +202,7 @@ class TestZeroCopy:
 
     def test_pointer_stability_across_expressions(self):
         """Test that the set pointer remains stable when used in expressions."""
-        seen = StringHashSet.from_iter(["a", "b"])
+        seen = StringHashSet.from_values(["a", "b"])
         ptr_before = seen._ptr()
 
         df = pl.DataFrame({"id": ["a", "c", "d"]})
@@ -213,7 +213,7 @@ class TestZeroCopy:
 
     def test_clone_shares_data(self):
         """Test that Python variable assignment shares the same underlying data."""
-        s1 = StringHashSet.from_iter(["a"])
+        s1 = StringHashSet.from_values(["a"])
         s2 = s1  # Python assignment
 
         # Both should point to the same underlying data

@@ -23,7 +23,7 @@ class StringHashSet:
         ...
 
     @staticmethod
-    def from_iter(values: List[str]) -> StringHashSet:
+    def from_values(values: List[str]) -> StringHashSet:
         """Create a StringHashSet from a list of strings.
 
         This is one of the few places where data is copied from Python to Rust.

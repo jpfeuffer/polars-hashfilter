@@ -30,7 +30,7 @@ import polars as pl
 from polars_hashfilter import StringHashSet
 
 # Create a persistent set
-seen = StringHashSet.from_iter(["alice", "bob"])
+seen = StringHashSet.from_values(["alice", "bob"])
 
 # Filter using the set
 df = pl.DataFrame({"user": ["alice", "charlie", "bob", "dave"]})
@@ -100,7 +100,7 @@ from polars_hashfilter import StringHashSet
 # Creation
 s = StringHashSet()                      # Empty set
 s = StringHashSet.with_capacity(1000)    # Pre-allocated
-s = StringHashSet.from_iter(["a", "b"])  # From iterable
+s = StringHashSet.from_values(["a", "b"])  # From iterable
 
 # Operations
 s.insert("value")      # Insert, returns True if new
@@ -125,7 +125,7 @@ The `StringHashSet` is stored behind `Arc<RwLock>`, meaning:
 1. **No copies when passing to expressions**: The set's memory address remains stable
 2. **Thread-safe**: Multiple readers OR one writer at a time
 3. **Copies only when necessary**:
-   - `StringHashSet.from_iter()` - copying Python strings to Rust
+   - `StringHashSet.from_values()` - copying Python strings to Rust
    - `StringHashSet.extend()` - copying Python strings to Rust
    - `StringHashSet.to_list()` - copying Rust strings to Python
 
