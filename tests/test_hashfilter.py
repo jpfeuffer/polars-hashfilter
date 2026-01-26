@@ -1,9 +1,13 @@
 """Tests for polars_hashfilter plugin."""
 
 import polars as pl
-import pytest
 
-from polars_hashfilter import StringHashSet, is_in_hashset, not_in_and_update, not_in_hashset
+from polars_hashfilter import (
+    StringHashSet,
+    is_in_hashset,
+    not_in_and_update,
+    not_in_hashset,
+)
 
 
 class TestStringHashSet:

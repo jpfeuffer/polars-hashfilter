@@ -33,7 +33,13 @@ from polars_hashfilter._internal import __version__ as __version__
 if TYPE_CHECKING:
     from polars.type_aliases import IntoExpr
 
-__all__ = ["StringHashSet", "__version__", "is_in_hashset", "not_in_hashset", "not_in_and_update"]
+__all__ = [
+    "StringHashSet",
+    "__version__",
+    "is_in_hashset",
+    "not_in_hashset",
+    "not_in_and_update",
+]
 
 PLUGIN_PATH = Path(__file__).parent
 
