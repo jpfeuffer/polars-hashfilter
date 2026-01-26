@@ -58,7 +58,7 @@ def is_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
         plugin_path=PLUGIN_PATH,
         function_name="is_in_hashset",
         args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
+        kwargs={"set_ptr": str(hashset._ptr())},
         is_elementwise=True,
     )
 
@@ -77,7 +77,7 @@ def not_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
         plugin_path=PLUGIN_PATH,
         function_name="not_in_hashset",
         args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
+        kwargs={"set_ptr": str(hashset._ptr())},
         is_elementwise=True,
     )
 
@@ -100,7 +100,7 @@ def not_in_and_update(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
         plugin_path=PLUGIN_PATH,
         function_name="not_in_and_update",
         args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
+        kwargs={"set_ptr": str(hashset._ptr())},
         is_elementwise=True,
     )
 

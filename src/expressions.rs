@@ -6,10 +6,11 @@ use pyo3_polars::derive::polars_expr;
 use serde::Deserialize;
 
 /// Kwargs for is_in_hashset expression.
-/// The set_ptr is the memory address of the Arc<RwLock<PlHashSet>>.
+/// The set_ptr is the memory address of the Arc<RwLock<PlHashSet>> as a string
+/// to avoid JSON number precision loss on 64-bit systems.
 #[derive(Deserialize)]
 struct IsInHashSetKwargs {
-    set_ptr: usize,
+    set_ptr: String,
 }
 
 /// Check if values in the input column exist in the StringHashSet.
@@ -20,12 +21,18 @@ struct IsInHashSetKwargs {
 fn is_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<Series> {
     let ca = inputs[0].str()?;
 
+    // Parse the pointer from string to avoid JSON number precision loss
+    let set_ptr: usize = kwargs
+        .set_ptr
+        .parse()
+        .map_err(|e| PolarsError::ComputeError(format!("Failed to parse set_ptr: {}", e).into()))?;
+
     // SAFETY: We reconstruct the Arc from the pointer passed from Python.
     // This is safe because:
     // 1. Python holds a reference to StringHashSet, keeping the Arc alive
     // 2. We increment the Arc count to prevent double-free
     // 3. The RwLock ensures thread-safe access
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let set = unsafe { reconstruct_arc(set_ptr) };
 
     let guard = set.inner.read().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire read lock: {}", e).into())
@@ -40,9 +47,10 @@ fn is_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<S
 }
 
 /// Kwargs for filter_and_update expression.
+/// The set_ptr is passed as a string to avoid JSON number precision loss.
 #[derive(Deserialize)]
 struct FilterAndUpdateKwargs {
-    set_ptr: usize,
+    set_ptr: String,
 }
 
 /// Filter rows NOT in the set, then add those values to the set.
@@ -62,7 +70,13 @@ struct FilterAndUpdateKwargs {
 fn not_in_and_update(inputs: &[Series], kwargs: FilterAndUpdateKwargs) -> PolarsResult<Series> {
     let ca = inputs[0].str()?;
 
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    // Parse the pointer from string to avoid JSON number precision loss
+    let set_ptr: usize = kwargs
+        .set_ptr
+        .parse()
+        .map_err(|e| PolarsError::ComputeError(format!("Failed to parse set_ptr: {}", e).into()))?;
+
+    let set = unsafe { reconstruct_arc(set_ptr) };
 
     // First pass: determine which values are NOT in the set (read lock)
     let results: Vec<Option<bool>> = {
@@ -100,7 +114,13 @@ fn not_in_and_update(inputs: &[Series], kwargs: FilterAndUpdateKwargs) -> Polars
 fn not_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<Series> {
     let ca = inputs[0].str()?;
 
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    // Parse the pointer from string to avoid JSON number precision loss
+    let set_ptr: usize = kwargs
+        .set_ptr
+        .parse()
+        .map_err(|e| PolarsError::ComputeError(format!("Failed to parse set_ptr: {}", e).into()))?;
+
+    let set = unsafe { reconstruct_arc(set_ptr) };
 
     let guard = set.inner.read().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire read lock: {}", e).into())
