@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "polars-hashfilter"
-version = "0.1.0"
+version = "0.1.1"
 description = "Polars plugin exposing PlHashSet for efficient filtering with persistent sets across LazyFrames"
 readme = "README.md"
 license = { text = "MIT" }
