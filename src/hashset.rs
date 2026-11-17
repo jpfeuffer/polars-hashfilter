@@ -2,7 +2,38 @@
 
 use polars::prelude::{InitHashMaps, PlHashSet};
 use pyo3::prelude::*;
-use std::sync::{Arc, RwLock};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
+
+type SharedSet = RwLock<PlHashSet<String>>;
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static SETS: OnceLock<Mutex<BTreeMap<u64, Weak<SharedSet>>>> = OnceLock::new();
+
+fn registry() -> &'static Mutex<BTreeMap<u64, Weak<SharedSet>>> {
+    SETS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(crate) fn lookup(id: u64) -> polars::prelude::PolarsResult<Arc<SharedSet>> {
+    use polars::prelude::PolarsError;
+    let sets = registry()
+        .lock()
+        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+    sets.get(&id).and_then(Weak::upgrade).ok_or_else(|| {
+        PolarsError::ComputeError(
+            "StringHashSet handle expired or belongs to another process".into(),
+        )
+    })
+}
+
+pub(crate) fn insert_borrowed(set: &mut PlHashSet<String>, value: &str) -> bool {
+    let mut inserted = false;
+    set.get_or_insert_with(value, |value| {
+        inserted = true;
+        value.to_owned()
+    });
+    inserted
+}
 
 /// A thread-safe wrapper around PlHashSet<String> that can be shared between Python and Rust
 /// without copying the underlying data.
@@ -11,10 +42,33 @@ use std::sync::{Arc, RwLock};
 /// - Multiple readers OR one writer at a time
 /// - Zero-copy when passed to Polars expressions
 /// - Thread-safe concurrent access from multiple LazyFrames
-#[pyclass]
-#[derive(Clone)]
+#[pyclass(skip_from_py_object, weakref)]
 pub struct StringHashSet {
     pub(crate) inner: Arc<RwLock<PlHashSet<String>>>,
+    id: u64,
+}
+
+impl StringHashSet {
+    fn from_set(set: PlHashSet<String>) -> Self {
+        let inner = Arc::new(RwLock::new(set));
+        let id = NEXT_ID
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("StringHashSet handle space exhausted");
+        registry()
+            .lock()
+            .expect("StringHashSet registry poisoned")
+            .insert(id, Arc::downgrade(&inner));
+        Self { inner, id }
+    }
+}
+
+impl Drop for StringHashSet {
+    fn drop(&mut self) {
+        registry()
+            .lock()
+            .expect("StringHashSet registry poisoned")
+            .remove(&self.id);
+    }
 }
 
 #[pymethods]
@@ -22,17 +76,13 @@ impl StringHashSet {
     /// Create a new empty StringHashSet.
     #[new]
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(PlHashSet::new())),
-        }
+        Self::from_set(PlHashSet::new())
     }
 
     /// Create a new StringHashSet with pre-allocated capacity.
     #[staticmethod]
     pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(PlHashSet::with_capacity(capacity))),
-        }
+        Self::from_set(PlHashSet::with_capacity(capacity))
     }
 
     /// Create a StringHashSet from an iterable of strings.
@@ -40,9 +90,7 @@ impl StringHashSet {
     #[staticmethod]
     pub fn from_values(values: Vec<String>) -> Self {
         let set: PlHashSet<String> = values.into_iter().collect();
-        Self {
-            inner: Arc::new(RwLock::new(set)),
-        }
+        Self::from_set(set)
     }
 
     /// Insert a value into the set. Returns true if the value was newly inserted.
@@ -130,6 +178,10 @@ impl StringHashSet {
     /// Get the memory address of the underlying set (for debugging zero-copy behavior).
     pub fn _ptr(&self) -> usize {
         Arc::as_ptr(&self.inner) as usize
+    }
+
+    pub fn _id(&self) -> u64 {
+        self.id
     }
 }
 

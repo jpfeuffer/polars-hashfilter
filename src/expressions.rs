@@ -1,6 +1,6 @@
 //! Polars expression plugins for filtering with StringHashSet.
 
-use crate::StringHashSet;
+use crate::hashset::{insert_borrowed, lookup};
 use polars::prelude::*;
 use pyo3_polars::derive::polars_expr;
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use serde::Deserialize;
 /// Kwargs for is_in_hashset expression.
 #[derive(Deserialize)]
 struct IsInHashSetKwargs {
-    set_ptr: usize,
+    set_id: u64,
 }
 
 /// Check if values in the input column exist in the StringHashSet.
@@ -17,21 +17,17 @@ struct IsInHashSetKwargs {
 /// This is a read-only operation on the set.
 #[polars_expr(output_type=Boolean)]
 fn is_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
+    let ca = string_values(&inputs[0])?;
 
-    // SAFETY: We reconstruct the Arc from the pointer passed from Python.
-    // This is safe because:
-    // 1. Python holds a reference to StringHashSet, keeping the Arc alive
-    // 2. We increment the Arc count to prevent double-free
-    // 3. The RwLock ensures thread-safe access
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    // The expression retains the Python owner; upgrade its checked weak handle.
+    let set = lookup(kwargs.set_id)?;
 
-    let guard = set.inner.read().map_err(|e| {
+    let guard = set.read().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire read lock: {}", e).into())
     })?;
 
     let out: BooleanChunked = ca
-        .into_iter()
+        .iter()
         .map(|opt_v| opt_v.map(|v| guard.contains(v)))
         .collect();
 
@@ -41,7 +37,7 @@ fn is_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<S
 /// Kwargs for filter_and_update expression.
 #[derive(Deserialize)]
 struct FilterAndUpdateKwargs {
-    set_ptr: usize,
+    set_id: u64,
 }
 
 /// Filter rows NOT in the set, then add those values to the set.
@@ -73,35 +69,32 @@ struct FilterAndUpdateKwargs {
 /// ```python
 /// seen = StringHashSet()
 /// for lf in lazy_frames:
-///     # Each .collect() is a single expression call - batch semantics apply
+///     # Batch semantics apply per expression call, not necessarily per collect.
 ///     df = lf.filter(col("id").hashfilter.not_in_and_update(seen)).collect()
 /// ```
 #[polars_expr(output_type=Boolean)]
 fn not_in_and_update(inputs: &[Series], kwargs: FilterAndUpdateKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
+    let ca = string_values(&inputs[0])?;
 
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let set = lookup(kwargs.set_id)?;
 
-    // First pass: determine which values are NOT in the set (read lock)
+    // Hold one lock across both passes so parallel batches cannot interleave.
+    let mut guard = set.write().map_err(|e| {
+        PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
+    })?;
+
+    // First pass: determine which values are NOT in the set
     let results: Vec<Option<bool>> = {
-        let guard = set.inner.read().map_err(|e| {
-            PolarsError::ComputeError(format!("Failed to acquire read lock: {}", e).into())
-        })?;
-
-        ca.into_iter()
+        ca.iter()
             .map(|opt_v| opt_v.map(|v| !guard.contains(v)))
             .collect()
     };
 
-    // Second pass: add new values to the set (write lock)
+    // Second pass: add new values to the set
     {
-        let mut guard = set.inner.write().map_err(|e| {
-            PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
-        })?;
-
-        for (opt_v, opt_result) in ca.into_iter().zip(results.iter()) {
+        for (opt_v, opt_result) in ca.iter().zip(results.iter()) {
             if let (Some(v), Some(true)) = (opt_v, opt_result) {
-                guard.insert(v.to_string());
+                insert_borrowed(&mut guard, v);
             }
         }
     }
@@ -126,7 +119,7 @@ fn not_in_and_update(inputs: &[Series], kwargs: FilterAndUpdateKwargs) -> Polars
 /// - You explicitly want row-by-row semantics (e.g., keeping only first occurrence)
 ///
 /// **Advantages**:
-/// - Single write lock (vs read + write)
+/// - One pass (vs separate lookup and insertion passes)
 /// - Better streaming performance
 /// - Lower memory (no intermediate Vec)
 #[polars_expr(output_type=Boolean)]
@@ -134,20 +127,20 @@ fn not_in_and_update_rowwise(
     inputs: &[Series],
     kwargs: FilterAndUpdateKwargs,
 ) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let ca = string_values(&inputs[0])?;
+    let set = lookup(kwargs.set_id)?;
 
     // Single pass: check and insert atomically with write lock
-    let mut guard = set.inner.write().map_err(|e| {
+    let mut guard = set.write().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
     })?;
 
     let out: BooleanChunked = ca
-        .into_iter()
+        .iter()
         .map(|opt_v| {
             opt_v.map(|v| {
                 // insert returns true if newly inserted (was not present before)
-                guard.insert(v.to_string())
+                insert_borrowed(&mut guard, v)
             })
         })
         .collect();
@@ -161,16 +154,16 @@ fn not_in_and_update_rowwise(
 /// This is a read-only operation on the set.
 #[polars_expr(output_type=Boolean)]
 fn not_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
+    let ca = string_values(&inputs[0])?;
 
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let set = lookup(kwargs.set_id)?;
 
-    let guard = set.inner.read().map_err(|e| {
+    let guard = set.read().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire read lock: {}", e).into())
     })?;
 
     let out: BooleanChunked = ca
-        .into_iter()
+        .iter()
         .map(|opt_v| opt_v.map(|v| !guard.contains(v)))
         .collect();
 
@@ -180,7 +173,7 @@ fn not_in_hashset(inputs: &[Series], kwargs: IsInHashSetKwargs) -> PolarsResult<
 /// Kwargs for update expression.
 #[derive(Deserialize)]
 struct UpdateKwargs {
-    set_ptr: usize,
+    set_id: u64,
 }
 
 /// Add all (non-null) string values from a Series to the StringHashSet.
@@ -200,15 +193,17 @@ struct UpdateKwargs {
 /// ```
 #[polars_expr(output_type=Null)]
 fn update(inputs: &[Series], kwargs: UpdateKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let ca = string_values(&inputs[0])?;
+    let set = lookup(kwargs.set_id)?;
 
-    let mut guard = set.inner.write().map_err(|e| {
+    let mut guard = set.write().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
     })?;
 
     // Bulk insert all non-null values
-    guard.extend(ca.into_iter().flatten().map(|s| s.to_string()));
+    for value in ca.iter().flatten() {
+        insert_borrowed(&mut guard, value);
+    }
 
     // Return a null series of the same length
     Ok(Series::new_null(PlSmallStr::EMPTY, ca.len()))
@@ -224,15 +219,17 @@ fn update(inputs: &[Series], kwargs: UpdateKwargs) -> PolarsResult<Series> {
 /// ```
 #[polars_expr(output_type_func=same_output_type)]
 fn update_chain(inputs: &[Series], kwargs: UpdateKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let ca = string_values(&inputs[0])?;
+    let set = lookup(kwargs.set_id)?;
 
-    let mut guard = set.inner.write().map_err(|e| {
+    let mut guard = set.write().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
     })?;
 
     // Bulk insert all non-null values
-    guard.extend(ca.into_iter().flatten().map(|s| s.to_string()));
+    for value in ca.iter().flatten() {
+        insert_borrowed(&mut guard, value);
+    }
 
     // Return the original series
     Ok(inputs[0].clone())
@@ -254,17 +251,17 @@ fn update_chain(inputs: &[Series], kwargs: UpdateKwargs) -> PolarsResult<Series>
 /// ```
 #[polars_expr(output_type=Boolean)]
 fn update_bool(inputs: &[Series], kwargs: UpdateKwargs) -> PolarsResult<Series> {
-    let ca = inputs[0].str()?;
-    let set = unsafe { reconstruct_arc(kwargs.set_ptr) };
+    let ca = string_values(&inputs[0])?;
+    let set = lookup(kwargs.set_id)?;
 
-    let mut guard = set.inner.write().map_err(|e| {
+    let mut guard = set.write().map_err(|e| {
         PolarsError::ComputeError(format!("Failed to acquire write lock: {}", e).into())
     })?;
 
     // Row-by-row: insert returns true if newly inserted
     let out: BooleanChunked = ca
-        .into_iter()
-        .map(|opt_v| opt_v.map(|v| guard.insert(v.to_string())))
+        .iter()
+        .map(|opt_v| opt_v.map(|v| insert_borrowed(&mut guard, v)))
         .collect();
 
     Ok(out.into_series())
@@ -275,19 +272,10 @@ fn same_output_type(input_fields: &[Field]) -> PolarsResult<Field> {
     Ok(input_fields[0].clone())
 }
 
-/// Reconstruct an Arc<StringHashSet> from a raw pointer.
-///
-/// # Safety
-/// The caller must ensure:
-/// - The pointer came from a valid StringHashSet._ptr() call
-/// - The original StringHashSet is still alive (Python holds a reference)
-unsafe fn reconstruct_arc(ptr: usize) -> StringHashSet {
-    use std::sync::{Arc, RwLock};
-
-    let arc_ptr = ptr as *const RwLock<polars::prelude::PlHashSet<String>>;
-    // Increment the reference count so we don't double-free
-    Arc::increment_strong_count(arc_ptr);
-    let inner = Arc::from_raw(arc_ptr);
-
-    StringHashSet { inner }
+fn string_values(input: &Series) -> PolarsResult<StringChunked> {
+    if input.dtype() == &DataType::Null {
+        Ok(StringChunked::full_null(input.name().clone(), input.len()))
+    } else {
+        input.str().cloned()
+    }
 }

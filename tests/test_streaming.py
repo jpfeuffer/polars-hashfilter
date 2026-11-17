@@ -104,7 +104,9 @@ class TestStreamingExecution:
         results = []
 
         for lf in lazy_frames:
-            df = lf.filter(pl.col("id").hashfilter.not_in_and_update(seen)).collect()
+            df = lf.filter(pl.col("id").hashfilter.not_in_and_update(seen)).collect(
+                engine="in-memory"
+            )
             results.append(df["id"].to_list())
 
         # First frame: all instances kept (including duplicate "a")

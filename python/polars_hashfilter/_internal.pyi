@@ -75,3 +75,7 @@ class StringHashSet:
     def _ptr(self) -> int:
         """Get the memory address of the underlying set (for internal use)."""
         ...
+
+    def _id(self) -> int:
+        """Return the process-local checked expression handle."""
+        ...
