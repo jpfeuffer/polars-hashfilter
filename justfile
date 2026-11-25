@@ -5,8 +5,7 @@ default:
 
 # Create virtual environment with uv
 venv:
-    uv venv -p python3.11
-    uv pip install -U polars maturin pytest ruff mypy
+    uv sync --group dev
 
 # Install in development mode
 dev: venv

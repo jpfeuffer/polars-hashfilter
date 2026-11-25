@@ -31,7 +31,7 @@ from polars_hashfilter._internal import StringHashSet
 from polars_hashfilter._internal import __version__ as __version__
 
 if TYPE_CHECKING:
-    from polars.type_aliases import IntoExpr
+    from polars._typing import IntoExpr
 
 __all__ = [
     "StringHashSet",
@@ -48,6 +48,33 @@ __all__ = [
 PLUGIN_PATH = Path(__file__).parent
 
 
+def _register(expr: IntoExpr, hashset: StringHashSet, function_name: str) -> pl.Expr:
+    def keep_alive(series: pl.Series) -> pl.Series:
+        # A pure identity UDF keeps the owner alive through Rust plan clones.
+        _ = hashset
+        return series
+
+    if isinstance(expr, pl.Expr):
+        input_expr = expr
+    elif isinstance(expr, str):
+        input_expr = pl.col(expr)
+    else:
+        input_expr = pl.lit(expr)
+    owned_input = input_expr.map_batches(
+        keep_alive,
+        return_dtype=pl.self_dtype(),
+        is_elementwise=True,
+    )
+    return register_plugin_function(
+        plugin_path=PLUGIN_PATH,
+        function_name=function_name,
+        args=owned_input,
+        kwargs={"set_id": hashset._id()},
+        is_elementwise=True,
+        is_deterministic=False,
+    )
+
+
 def is_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     """Check if values exist in the StringHashSet.
 
@@ -58,13 +85,7 @@ def is_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Returns:
         Boolean expression where True indicates the value exists in the set
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="is_in_hashset",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "is_in_hashset")
 
 
 def not_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -77,13 +98,7 @@ def not_in_hashset(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Returns:
         Boolean expression where True indicates the value does NOT exist in the set
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="not_in_hashset",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "not_in_hashset")
 
 
 def not_in_and_update(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -116,13 +131,7 @@ def not_in_and_update(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
         Boolean expression where True indicates the value was NOT in the set
         (and has now been added to it)
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="not_in_and_update",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "not_in_and_update")
 
 
 def not_in_and_update_rowwise(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -131,6 +140,10 @@ def not_in_and_update_rowwise(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr
     IMPORTANT: Uses row-by-row semantics where duplicates within the same batch
     are handled sequentially. The first occurrence returns True, subsequent
     duplicates return False.
+
+    Parallel batches may run out of source order. This does not guarantee which
+    source occurrence is retained; counts remain exact. The expression retains
+    its set, including across repeated collects. Use fresh state for a new check.
 
     Example:
         Input: ["a", "b", "a"] with empty set
@@ -148,13 +161,7 @@ def not_in_and_update_rowwise(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr
     Returns:
         Boolean expression where True indicates the value was NOT in the set
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="not_in_and_update_rowwise",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "not_in_and_update_rowwise")
 
 
 def update(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -182,13 +189,7 @@ def update(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Returns:
         Null series (side-effect only operation)
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="update",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "update")
 
 
 def update_chain(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -209,13 +210,7 @@ def update_chain(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Returns:
         The original input Series unchanged
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="update_chain",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "update_chain")
 
 
 def update_bool(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
@@ -228,6 +223,9 @@ def update_bool(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Uses row-by-row evaluation, so duplicates within the same batch:
     - First occurrence: returns True (newly inserted)
     - Subsequent occurrences: return False (already present from earlier row)
+
+    Parallel batch order does not guarantee the first source occurrence.
+    Repeated collects reuse the set; construct fresh state for independent checks.
 
     Example:
         ```python
@@ -242,13 +240,7 @@ def update_bool(expr: IntoExpr, hashset: StringHashSet) -> pl.Expr:
     Returns:
         Boolean expression where True indicates the value was newly inserted
     """
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="update_bool",
-        args=expr,
-        kwargs={"set_ptr": hashset._ptr()},
-        is_elementwise=True,
-    )
+    return _register(expr, hashset, "update_bool")
 
 
 @pl.api.register_expr_namespace("hashfilter")

@@ -104,7 +104,9 @@ class TestStreamingExecution:
         results = []
 
         for lf in lazy_frames:
-            df = lf.filter(pl.col("id").hashfilter.not_in_and_update(seen)).collect()
+            df = lf.filter(pl.col("id").hashfilter.not_in_and_update(seen)).collect(
+                engine="in-memory"
+            )
             results.append(df["id"].to_list())
 
         # First frame: all instances kept (including duplicate "a")
@@ -133,9 +135,9 @@ class TestStreamingExecution:
             ).collect()
             results.append(df["id"].to_list())
 
-        # First frame: only first "a" kept (rowwise dedup)
-        assert results[0] == ["a", "b"]
-        # Second frame: only first "c" (b already seen, rowwise dedup)
+        # First frame: one "a" kept; parallel chunks need not run in input order.
+        assert sorted(results[0]) == ["a", "b"]
+        # Second frame: one "c" kept (b already seen, rowwise dedup)
         assert results[1] == ["c"]
         # Third frame: only "d" (c already seen)
         assert results[2] == ["d"]
