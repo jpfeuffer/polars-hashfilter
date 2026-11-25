@@ -193,7 +193,7 @@ wheels = [
 
 [[package]]
 name = "polars-hashfilter"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "polars" },
@@ -208,7 +208,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "polars", specifier = "==2.1.0" }]
+requires-dist = [{ name = "polars", specifier = ">=2.0,<3.0" }]
 
 [package.metadata.requires-dev]
 dev = [
