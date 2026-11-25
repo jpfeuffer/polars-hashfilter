@@ -18,7 +18,7 @@ A Polars plugin exposing `PlHashSet` for efficient filtering with persistent set
 
 ## Installation
 
-Requires Python 3.11+ and Python Polars 2.1.0. Rust bindings are built against
+Requires Python 3.11+ and Python Polars >=2.0,<3.0. Rust bindings are built against
 Polars 0.55.2 / pyo3-polars 0.28. Rebuild the extension after changing Rust code.
 
 ```bash
@@ -232,7 +232,7 @@ expression/set to receive independent checks or an identical cached row mask.
 Keep validation on its own branch and share the **unmodified source** with the
 sink. In the regression test, an instrumented source processes 60,002 rows
 exactly once across validation and a lazy Parquet sink in `collect_all`.
-This is verified on the pinned version, not a general optimizer guarantee.
+This is covered by tests, not a general optimizer guarantee.
 
 The sink runs even if validation returns `True`; `collect_all` is not a
 transaction or a conditional publication mechanism. Use a staged output path

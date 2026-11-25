@@ -15,6 +15,9 @@ from benchmarks.disk_backed_uniqueness import sqlite_check
 @pytest.mark.parametrize("method", ["group", "count", "sort", "sqlite"])
 @pytest.mark.parametrize("rows,distinct", [(0, 1), (60, 25), (60, 60)])
 @pytest.mark.skipif(sys.platform == "win32", reason="RSS probe uses Unix resource")
+@pytest.mark.skipif(
+    pl.__version__ != "2.1.0", reason="Disk probe is specific to Polars 2.1.0"
+)
 def test_disk_probe_methods(tmp_path, method, rows, distinct):
     command = [
         sys.executable,
